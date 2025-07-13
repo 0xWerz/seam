@@ -1,0 +1,15 @@
+{
+  "name": "seam",
+  "description": "Use the seam CLI from Claude Code to track a security review of a codebase.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Moussa Omrane"
+  },
+  "repository": "https://github.com/0xWerz/seam",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "code-review",
+    "audit"
+  ]
+}

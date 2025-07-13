@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>seam</title>
+<style>
+  /* One neutral scale and one colour. Red means a path with no check on it,
+     and nothing else on the page is allowed to be red. Kinds are told apart
+     by shape. Nothing is loaded from the network. */
+  :root {
+    --bg: #101012;
+    --raised: #17171a;
+    --line: #26262b;
+    --empty: #303036;
+    --text: #e9e9eb;
+    --dim: #92929a;
+    --faint: #5a5a62;
+    --red: #f2554f;
+    --amber: #d6a23e;
+    --code: #141417;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #fbfbfa;
+      --raised: #ffffff;
+      --line: #e5e5e2;
+      --empty: #dcdcd8;
+      --text: #1a1a1c;
+      --dim: #68686e;
+      --faint: #a4a4aa;
+      --red: #cb2f29;
+      --amber: #9a6500;
+      --code: #f4f4f2;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfbfa;
+    --raised: #ffffff;
+    --line: #e5e5e2;
+    --empty: #dcdcd8;
+    --text: #1a1a1c;
+    --dim: #68686e;
+    --faint: #a4a4aa;
+    --red: #cb2f29;
+    --amber: #9a6500;
+    --code: #f4f4f2;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  :focus-visible { outline: 1.5px solid var(--text); outline-offset: 2px; border-radius: 2px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .dim { color: var(--dim); }
+
+  header {
+    display: flex; align-items: center; gap: 28px;
+    height: 52px; padding: 0 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .brand span { color: var(--dim); font-weight: 400; margin-left: 10px; }
+  nav { display: flex; gap: 4px; margin-right: auto; }
+  nav button {
+    padding: 5px 10px; border-radius: 5px; color: var(--dim);
+  }
+  nav button:hover { color: var(--text); }
+  nav button[aria-selected="true"] { color: var(--text); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); }
+  nav button b { font-weight: 400; color: var(--faint); margin-left: 6px; font-variant-numeric: tabular-nums; }
+  nav button.alert b { color: var(--red); }
+  .reviewed { display: flex; align-items: center; gap: 10px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .meter { width: 96px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; display: flex; }
+  .meter i { display: block; height: 100%; background: var(--text); }
+  .meter i.changed { background: var(--amber); }
+  #filter {
+    width: 200px; height: 30px; padding: 0 10px;
+    background: transparent; border: 1px solid var(--line); border-radius: 5px;
+  }
+  #filter::placeholder { color: var(--faint); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 42%); min-height: 0; }
+  #list, #detail { overflow: auto; min-height: 0; }
+  #list { padding: 6px 0 80px; }
+  #detail { border-left: 1px solid var(--line); padding: 26px 30px 80px; }
+
+  h2 {
+    margin: 0; padding: 20px 24px 8px;
+    font-size: 12px; font-weight: 500; color: var(--dim);
+  }
+  h2 b { font-weight: 400; color: var(--faint); margin-left: 6px; }
+  h2.alert, h2.alert b { color: var(--red); }
+
+  /* Marks: one shape per kind, drawn in the text colour. */
+  svg.mark { width: 9px; height: 9px; flex: none; fill: currentColor; }
+  svg.mark.hollow { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+  .row {
+    display: grid; align-items: center; gap: 14px;
+    width: 100%; min-height: 36px; padding: 5px 24px;
+    border-top: 1px solid transparent; border-bottom: 1px solid transparent;
+  }
+  .row:hover { background: var(--raised); }
+  .row[aria-current="true"] { background: var(--raised); border-color: var(--line); }
+  .row.hidden { display: none; }
+  .end { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+  .end svg { align-self: center; }
+  .end .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .end .at { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+
+  /* A path: where input enters on the left, what it reaches on the right,
+     and every stop between drawn on the line that joins them. */
+  .row.path { grid-template-columns: minmax(0, 5fr) minmax(70px, 4fr) minmax(0, 5fr); }
+  .rail { display: flex; align-items: center; gap: 5px; color: var(--faint); }
+  .rail i { flex: 1; min-width: 8px; border-top: 1px solid currentColor; }
+  .rail b { font-weight: 400; font-size: 11.5px; font-variant-numeric: tabular-nums; margin-left: -1px; }
+  .path.unchecked .rail { color: var(--red); }
+  .path.unchecked .rail i { border-top-style: dashed; }
+  .path.unchecked .end svg { color: var(--red); }
+
+  .row.unit { grid-template-columns: 26px minmax(0, 4fr) minmax(0, 7fr); }
+  .row.unit .marks { display: flex; gap: 3px; color: var(--dim); }
+  .row.unit .what { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.note { grid-template-columns: 62px minmax(0, 4fr) minmax(0, 7fr); align-items: baseline; padding-top: 9px; padding-bottom: 9px; }
+  .row.note .what { color: var(--text); }
+  .status { color: var(--dim); font-size: 12px; }
+  .status.finding { color: var(--red); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 16px 24px 10px; }
+  .chips button { display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 12px; color: var(--dim); box-shadow: inset 0 0 0 1px var(--line); }
+  .chips button[aria-pressed="true"] { color: var(--bg); background: var(--text); box-shadow: none; }
+
+  /* Coverage: one square per unit. */
+  .area { padding: 14px 24px 6px; }
+  .area p { margin: 0 0 8px; display: flex; gap: 10px; align-items: baseline; }
+  .area p span:last-child { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .cells { display: flex; flex-wrap: wrap; gap: 3px; }
+  .cells button { width: 10px; height: 10px; border-radius: 2px; background: var(--empty); }
+  .cells button.done { background: var(--text); }
+  .cells button.changed { background: var(--amber); }
+  .cells button:hover { outline: 1.5px solid var(--dim); outline-offset: 1px; }
+  .bar { height: 4px; max-width: 420px; background: var(--line); border-radius: 2px; overflow: hidden; display: flex; }
+  .bar i { display: block; height: 100%; background: var(--text); }
+  .bar i.changed { background: var(--amber); }
+  .legend { display: flex; gap: 18px; padding: 18px 24px 4px; color: var(--dim); font-size: 12px; }
+  .legend span { display: flex; align-items: center; gap: 7px; }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--empty); }
+  .legend i.done { background: var(--text); }
+  .legend i.changed { background: var(--amber); }
+
+  /* Detail */
+  #detail h1 { margin: 0; font: 600 15px/1.4 var(--mono); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  #detail h1 .to { color: var(--faint); font-weight: 400; margin: 0 8px; }
+  .verdict { margin: 6px 0 26px; color: var(--dim); }
+  .verdict.unchecked { color: var(--red); }
+
+  .stops { list-style: none; margin: 0; padding: 0; }
+  .stop { position: relative; padding: 0 0 26px 30px; }
+  /* The line that joins one stop to the next. */
+  .stop::before { content: ""; position: absolute; left: 4px; top: 16px; bottom: -4px; border-left: 1px solid var(--line); }
+  .stop:last-child::before { display: none; }
+  .stops.unchecked .stop::before { border-left: 1px dashed var(--red); }
+  .stop > svg.mark { position: absolute; left: 0; top: 5px; }
+  .stops.unchecked .stop > svg.mark { color: var(--red); }
+  .stop .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .stop .head button { font-weight: 600; }
+  .stop .head button:hover, .jump:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .stop .at, #detail .at { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+  .stop.side { padding-left: 30px; margin-left: 22px; }
+  .stop.side::before { display: none; }
+  .gap { position: relative; padding: 0 0 26px 30px; color: var(--red); }
+  .gap::before { content: ""; position: absolute; left: 4px; top: -4px; bottom: -4px; border-left: 1px dashed var(--red); }
+
+  .claim { margin-top: 8px; }
+  .claim .kind { color: var(--dim); font-size: 12px; }
+  .claim .kind .state { color: var(--amber); margin-left: 8px; }
+  .claim p { margin: 1px 0 0; font-size: 13.5px; line-height: 1.5; max-width: 62ch; }
+  .quote {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 14px;
+    margin: 8px 0 0; padding: 9px 12px;
+    background: var(--code); border: 1px solid var(--line); border-radius: 5px;
+    font: 12px/1.6 var(--mono);
+  }
+  .quote .ln { color: var(--faint); text-align: right; user-select: none; }
+  .quote code { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }
+  .tags li { padding: 0 7px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line); color: var(--dim); font-size: 11.5px; line-height: 18px; }
+  .unclaimed { margin-top: 6px; color: var(--faint); }
+
+  #detail h3 { margin: 28px 0 8px; font-size: 12px; font-weight: 500; color: var(--dim); }
+  .notes, .links { list-style: none; margin: 0; padding: 0; }
+  .notes li { margin-bottom: 10px; max-width: 62ch; }
+  .notes .status { display: block; }
+  .links li { padding: 2px 0; }
+  .jump { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+
+  .blank { max-width: 44ch; padding: 60px 24px; }
+  .blank p { margin: 0 0 10px; color: var(--dim); font-size: 14px; line-height: 1.6; }
+  .blank p:first-child { color: var(--text); font-weight: 600; font-size: 15px; }
+  code.cmd { font: 12.5px var(--mono); color: var(--text); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); padding: 1px 6px; border-radius: 4px; }
+  .keys { margin-top: 40px; color: var(--faint); font-size: 12px; }
+  kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--line); color: var(--dim); }
+
+  /* Code is shown exactly as written: no ligature may turn !== into one
+     glyph. Last in the sheet, because the font shorthand resets these. */
+  .mono, .quote, .quote code, .jump, code, #detail h1, .at {
+    font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+  }
+
+  @media (max-width: 900px) {
+    body { display: block; }
+    header { height: auto; flex-wrap: wrap; gap: 12px 20px; padding: 12px 16px; }
+    nav { order: 3; width: 100%; overflow-x: auto; }
+    #filter { flex: 1; }
+    main { display: block; }
+    #detail { border-left: 0; border-top: 1px solid var(--line); padding: 22px 16px 60px; }
+    h2, .row, .chips, .area, .legend { padding-left: 16px; padding-right: 16px; }
+    .row.path { grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); }
+    .end .at { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">seam<span id="project"></span></div>
+  <nav id="tabs" role="tablist" aria-label="Views"></nav>
+  <div class="reviewed"><span id="count"></span><span class="meter" id="meter"></span></div>
+  <input id="filter" type="search" placeholder="Filter" aria-label="Filter this list">
+</header>
+<main>
+  <div id="list" role="tabpanel"></div>
+  <div id="detail" aria-live="polite"></div>
+</main>
+<script>
+const DATA = "__SEAM_DATA__";
+
+const SHAPES = {
+  entry: "M1 0.5 L8.5 4.5 L1 8.5 Z",
+  guard: "M4.5 0 L9 4.5 L4.5 9 L0 4.5 Z",
+  sink: "M0.5 0.5 H8.5 V8.5 H0.5 Z",
+  data: "M4.5 0.4 A4.1 4.1 0 1 0 4.5 8.6 A4.1 4.1 0 1 0 4.5 0.4 Z",
+  none: "M4.5 1.6 A2.9 2.9 0 1 0 4.5 7.4 A2.9 2.9 0 1 0 4.5 1.6 Z",
+};
+const KIND = { entry: "Input enters", guard: "Check", sink: "Sensitive operation", data: "Sensitive data", none: "Nothing security-relevant" };
+const ORDER = ["entry", "guard", "sink", "data"];
+
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === false || value == null) continue;
+    if (key === "class") node.className = value; else node.setAttribute(key, value);
+  }
+  node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
+  return node;
+}
+function mark(kind) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 9 9");
+  svg.setAttribute("class", `mark${kind === "none" ? " hollow" : ""}`);
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", SHAPES[kind] || SHAPES.none);
+  svg.append(path);
+  return svg;
+}
+
+const node = (id) => DATA.nodes[id];
+const name = (id) => node(id)?.name || id.split("#").pop();
+const where = (id) => { const n = node(id); return n ? `${n.path}:${n.start}` : id.split("#")[0]; };
+const kindsOf = (id) => (node(id)?.kinds || []).filter((k) => k !== "none");
+/** The mark that best says what a unit is, in the role it plays on a path. */
+const primary = (id, prefer) => { const k = kindsOf(id); return k.includes(prefer) ? prefer : ORDER.find((o) => k.includes(o)) || "none"; };
+const text = (id) => `${id} ${(node(id)?.claims || []).map((c) => `${c.summary} ${c.tags.join(" ")}`).join(" ")}`.toLowerCase();
+
+const units = Object.keys(DATA.nodes).filter((id) => kindsOf(id).length)
+  .sort((a, b) => ORDER.indexOf(primary(a)) - ORDER.indexOf(primary(b)) || a.localeCompare(b));
+const unchecked = DATA.paths.filter((p) => !p.checked);
+const percent = DATA.coverage.total ? Math.round((DATA.coverage.reviewed / DATA.coverage.total) * 100) : 0;
+
+const TABS = [
+  { id: "paths", label: "Paths", count: DATA.paths.length, alert: unchecked.length > 0 },
+  { id: "units", label: "Units", count: units.length },
+  { id: "notes", label: "Notes", count: DATA.notes.length },
+  { id: "coverage", label: "Coverage", count: `${percent}%` },
+];
+let tab = "paths";
+let selected = null;   // { path: index } or { unit: id }
+let kindFilter = null;
+
+function header() {
+  $("project").textContent = DATA.project;
+  document.title = `${DATA.project || "seam"} · seam`;
+  const { total, reviewed, outdated } = DATA.coverage;
+  $("count").textContent = `${reviewed} of ${total} reviewed`;
+  const done = el("i"); done.style.width = `${total ? (reviewed / total) * 100 : 0}%`;
+  const changed = el("i", { class: "changed" }); changed.style.width = `${total ? (outdated / total) * 100 : 0}%`;
+  $("meter").append(done, changed);
+  $("meter").title = outdated ? `${outdated} changed since review` : "";
+  const nav = $("tabs");
+  for (const t of TABS) {
+    const button = el("button", { role: "tab", id: `tab-${t.id}`, class: t.alert ? "alert" : "", "aria-selected": "false" }, t.label, el("b", {}, String(t.count)));
+    button.addEventListener("click", () => show(t.id));
+    nav.append(button);
+  }
+}
+
+function endpoint(id, kind) {
+  return el("span", { class: "end" }, mark(primary(id, kind)), el("span", { class: "name mono" }, name(id)), el("span", { class: "at mono" }, where(id)));
+}
+
+function pathRow(p, i) {
+  // The line between the two ends carries one diamond per check on the
+  // path, and a dot for each unit passed through that checks nothing.
+  const rail = el("span", { class: "rail", "aria-hidden": "true" }, el("i"));
+  const passed = p.stops.slice(1, -1).filter((id) => !p.guards.includes(id)).length;
+  if (p.guards.length > 4) rail.append(mark("guard"), el("b", {}, String(p.guards.length)), el("i"));
+  else for (const _ of p.guards) rail.append(mark("guard"), el("i"));
+  if (!p.guards.length) for (let n = 0; n < Math.min(passed, 4); n++) rail.append(mark("none"), el("i"));
+  const same = p.entry === p.sink;
+  const row = el("button", { class: `row path${p.checked ? "" : " unchecked"}`, "data-key": `path:${i}`, "data-text": p.stops.concat(p.guards).map(text).join(" ") },
+    endpoint(p.entry, "entry"), rail, same ? el("span", { class: "end dim" }, "acts on it itself") : endpoint(p.sink, "sink"));
+  row.addEventListener("click", () => select({ path: i }));
+  return row;
+}
+
+function unitRow(id) {
+  const n = node(id);
+  const marks = el("span", { class: "marks" });
+  kindsOf(id).forEach((k) => marks.append(mark(k)));
+  const summary = (n.claims.find((c) => c.kind !== "none") || n.claims[0] || {}).summary || "";
+  const row = el("button", { class: "row unit", "data-key": `unit:${id}`, "data-kinds": kindsOf(id).join(" "), "data-text": text(id) },
+    marks, el("span", { class: "end" }, el("span", { class: "name mono" }, n.name), el("span", { class: "at mono" }, where(id))),
+    el("span", { class: "what" }, summary));
+  row.addEventListener("click", () => select({ unit: id }));
+  return row;
+}
+
+function heading(label, count, alert) {
+  return el("h2", { class: alert ? "alert" : "" }, label, el("b", {}, String(count)));
+}
+
+function blank(...lines) {
+  return el("div", { class: "blank" }, ...lines.map((line) => el("p", {}, ...[].concat(line))));
+}
+const cmd = (c) => el("code", { class: "cmd" }, c);
+
+const VIEWS = {
+  paths(list) {
+    if (!DATA.paths.length && !DATA.idle.length) {
+      list.append(blank("No paths yet",
+        ["A path runs from a place where input enters to a sensitive operation. Claim both ends with ", cmd("seam claim"), " and it appears here."]));
+      return;
+    }
+    if (unchecked.length) list.append(heading("No check on the way", unchecked.length, true));
+    DATA.paths.forEach((p, i) => { if (!p.checked) list.append(pathRow(p, i)); });
+    const checked = DATA.paths.filter((p) => p.checked);
+    if (checked.length) list.append(heading("Checked", checked.length));
+    DATA.paths.forEach((p, i) => { if (p.checked) list.append(pathRow(p, i)); });
+    if (DATA.idle.length) {
+      list.append(heading("Reaches nothing sensitive", DATA.idle.length));
+      DATA.idle.filter(node).forEach((id) => {
+        const row = el("button", { class: "row path", "data-key": `unit:${id}`, "data-text": text(id) }, endpoint(id, "entry"), el("span"), el("span"));
+        row.addEventListener("click", () => select({ unit: id }));
+        list.append(row);
+      });
+    }
+  },
+  units(list) {
+    if (!units.length) { list.append(blank("Nothing claimed yet", ["Read a unit with ", cmd("seam show"), ", then record what it is with ", cmd("seam claim"), "."])); return; }
+    const chips = el("div", { class: "chips" });
+    const chip = (kind, label) => {
+      const n = kind ? units.filter((id) => kindsOf(id).includes(kind)).length : units.length;
+      const button = el("button", { "aria-pressed": String(kindFilter === kind) }, kind ? mark(kind) : null, `${label} ${n}`);
+      button.addEventListener("click", () => { kindFilter = kind; show("units"); });
+      return button;
+    };
+    chips.append(chip(null, "All"), ...ORDER.filter((k) => units.some((id) => kindsOf(id).includes(k))).map((k) => chip(k, KIND[k])));
+    list.append(chips);
+    units.filter((id) => !kindFilter || kindsOf(id).includes(kindFilter)).forEach((id) => list.append(unitRow(id)));
+  },
+  notes(list) {
+    if (!DATA.notes.length) { list.append(blank("No notes", ["Ideas, tested paths, dead ends and findings recorded with ", cmd("seam note"), " are kept here, so the next session starts where this one stopped."])); return; }
+    const rank = { finding: 0, idea: 1, tested: 2, "dead-end": 3 };
+    [...DATA.notes].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9)).forEach((n) => {
+      const row = el("button", { class: "row note", "data-key": `unit:${n.node}`, "data-text": `${n.node} ${n.status} ${n.text}`.toLowerCase() },
+        el("span", { class: `status ${n.status}` }, n.status), el("span", { class: "end" }, el("span", { class: "name mono" }, name(n.node)), el("span", { class: "at mono" }, where(n.node))), el("span", { class: "what" }, n.text));
+      row.addEventListener("click", () => select({ unit: n.node }));
+      list.append(row);
+    });
+  },
+  coverage(list) {
+    list.append(el("div", { class: "legend" },
+      el("span", {}, el("i", { class: "done" }), "Reviewed"),
+      el("span", {}, el("i", { class: "changed" }), "Changed since review"),
+      el("span", {}, el("i"), "Not reviewed")));
+    const byArea = new Map(DATA.areas.map((a) => [a.name, []]));
+    const areaOf = (path) => { const p = path.split("/"); return p.length === 1 ? "." : p.length === 2 ? p[0] : `${p[0]}/${p[1]}`; };
+    for (const [id, state] of DATA.units || []) byArea.get(areaOf(id.split("#")[0]))?.push([id, state]);
+    for (const a of DATA.areas) {
+      const block = el("div", { class: "area", "data-text": a.name.toLowerCase() },
+        el("p", {}, el("span", { class: "mono" }, a.name === "." ? "top level" : a.name), el("span", {}, `${a.reviewed}/${a.total}`)));
+      if (DATA.units) {
+        const cells = el("div", { class: "cells" });
+        for (const [id, state] of byArea.get(a.name)) {
+          const cell = el("button", { class: ["", "done", "changed"][state], title: id, "aria-label": `${id}: ${["not reviewed", "reviewed", "changed since review"][state]}` });
+          cell.addEventListener("click", () => select({ unit: id }));
+          cells.append(cell);
+        }
+        block.append(cells);
+      } else {
+        const done = el("i"); done.style.width = `${(a.reviewed / a.total) * 100}%`;
+        const changed = el("i", { class: "changed" }); changed.style.width = `${(a.outdated / a.total) * 100}%`;
+        block.append(el("div", { class: "bar" }, done, changed));
+      }
+      list.append(block);
+    }
+  },
+};
+
+function show(id) {
+  tab = id;
+  for (const t of TABS) $(`tab-${t.id}`).setAttribute("aria-selected", String(t.id === id));
+  const list = $("list");
+  list.setAttribute("aria-labelledby", `tab-${id}`);
+  list.replaceChildren();
+  VIEWS[id](list);
+  list.scrollTop = 0;
+  filter();
+  current();
+}
+
+function filter() {
+  const query = $("filter").value.trim().toLowerCase();
+  $("list").querySelectorAll("[data-text]").forEach((row) => {
+    row.classList.toggle("hidden", Boolean(query) && !row.dataset.text.includes(query));
+  });
+}
+
+function current() {
+  const key = selected && ("path" in selected ? `path:${selected.path}` : `unit:${selected.unit}`);
+  $("list").querySelectorAll(".row").forEach((row) => row.setAttribute("aria-current", String(row.dataset.key === key)));
+}
+
+function select(next) {
+  selected = next;
+  history.replaceState(null, "", next ? ("path" in next ? `#path=${next.path}` : `#unit=${encodeURIComponent(next.unit)}`) : location.pathname);
+  current();
+  detail();
+}
+
+function claimBlock(c) {
+  const kind = el("div", { class: "kind" }, KIND[c.kind] || c.kind);
+  if (c.state === "changed") kind.append(el("span", { class: "state" }, "code changed since"));
+  if (c.state === "stale") kind.append(el("span", { class: "state" }, "quoted code is gone"));
+  const block = el("div", { class: "claim" }, kind, el("p", {}, c.summary));
+  if (c.quote) block.append(el("div", { class: "quote" }, el("span", { class: "ln" }, c.line ? String(c.line) : ""), el("code", {}, c.quote)));
+  if (c.tags.length) block.append(el("ul", { class: "tags" }, ...c.tags.map((t) => el("li", {}, t))));
+  return block;
+}
+
+function stop(id, role, extra = "") {
+  const n = node(id);
+  const open = el("button", { class: "mono" }, name(id));
+  open.addEventListener("click", () => select({ unit: id }));
+  const item = el("li", { class: `stop${extra}` }, mark(primary(id, role)),
+    el("div", { class: "head" }, open, el("span", { class: "at" }, where(id))));
+  const claims = (n?.claims || []).filter((c) => c.kind !== "none");
+  // On a path, show the claim that explains the unit's part in it first.
+  claims.sort((a, b) => (b.kind === role) - (a.kind === role));
+  if (claims.length) claims.forEach((c) => item.append(claimBlock(c)));
+  else item.append(el("div", { class: "unclaimed" }, n?.claims.length ? "Reviewed: nothing security-relevant." : "Not reviewed yet."));
+  return item;
+}
+
+function detail() {
+  const pane = $("detail");
+  pane.scrollTop = 0;
+  if (!selected) {
+    pane.replaceChildren(el("div", { class: "blank" },
+      el("p", {}, "Select a row"),
+      el("p", {}, "Paths show how input travels from where it enters to what it can reach, and which checks stand in between."),
+      el("p", { class: "keys" }, el("kbd", {}, "↑"), " ", el("kbd", {}, "↓"), " move   ", el("kbd", {}, "/"), " filter   ", el("kbd", {}, "1"), "–", el("kbd", {}, "4"), " views")));
+    return;
+  }
+  if ("path" in selected) {
+    const p = DATA.paths[selected.path];
+    const same = p.entry === p.sink;
+    const title = el("h1", {}, name(p.entry));
+    if (!same) title.append(el("span", { class: "to" }, "→"), name(p.sink));
+    const beside = p.guards.filter((g) => !p.stops.includes(g));
+    const verdict = p.checked
+      ? `${p.guards.length} check${p.guards.length === 1 ? "" : "s"} recorded on this path`
+      : same ? "Takes input and acts on it, with no check recorded" : "No check recorded on this path";
+    const stops = el("ol", { class: `stops${p.checked ? "" : " unchecked"}` });
+    p.stops.forEach((id, i) => {
+      const role = i === 0 ? "entry" : i === p.stops.length - 1 ? "sink" : "guard";
+      stops.append(stop(id, same ? "entry" : role));
+      // Checks this stop calls sit beside the line, under the stop that calls them.
+      beside.filter((g) => (node(id)?.uses || []).includes(g)).forEach((g) => stops.append(stop(g, "guard", " side")));
+    });
+    pane.replaceChildren(title, el("p", { class: `verdict${p.checked ? "" : " unchecked"}` }, verdict), stops);
+    return;
+  }
+  const id = selected.unit;
+  const n = node(id);
+  if (!n) {
+    pane.replaceChildren(el("h1", {}, id.split("#").pop()), el("p", { class: "verdict" }, id), el("p", { class: "dim" }, "Not reviewed yet. Read it with ", cmd(`seam show '${id}'`), "."));
+    return;
+  }
+  const parts = [el("h1", {}, n.name), el("p", { class: "verdict at" }, `${n.path}:${n.start}-${n.end}`)];
+  if (n.claims.length) n.claims.forEach((c) => parts.push(claimBlock(c)));
+  else parts.push(el("p", { class: "dim" }, "Not reviewed yet."));
+  if (n.notes.length) parts.push(el("h3", {}, "Notes"), el("ul", { class: "notes" }, ...n.notes.map((x) => el("li", {}, el("span", { class: `status ${x.status}` }, x.status), x.text))));
+  const on = DATA.paths.map((p, i) => [p, i]).filter(([p]) => p.stops.includes(id) || p.guards.includes(id));
+  if (on.length) {
+    parts.push(el("h3", {}, "On paths"), el("ul", { class: "links" }, ...on.map(([p, i]) => {
+      const jump = el("button", { class: "jump" }, p.entry === p.sink ? name(p.entry) : `${name(p.entry)} → ${name(p.sink)}`);
+      jump.addEventListener("click", () => { if (tab !== "paths") show("paths"); select({ path: i }); });
+      return el("li", {}, jump, p.checked ? null : el("span", { class: "status finding" }, "  no check"));
+    })));
+  }
+  for (const [label, ids] of [["Uses", n.uses], ["Used by", n.used_by]]) {
+    if (!ids.length) continue;
+    parts.push(el("h3", {}, label), el("ul", { class: "links" }, ...ids.map((other) => {
+      const jump = el("button", { class: "jump" }, name(other));
+      jump.addEventListener("click", () => select({ unit: other }));
+      return el("li", {}, jump, el("span", { class: "at" }, `  ${where(other)}`));
+    })));
+  }
+  pane.replaceChildren(...parts);
+}
+
+$("filter").addEventListener("input", filter);
+document.addEventListener("keydown", (event) => {
+  const typing = event.target === $("filter");
+  if (event.key === "Escape") { $("filter").value = ""; filter(); $("filter").blur(); return; }
+  if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === "/") { event.preventDefault(); $("filter").focus(); return; }
+  const n = Number(event.key);
+  if (n >= 1 && n <= TABS.length) { show(TABS[n - 1].id); return; }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "j" || event.key === "k") {
+    const rows = [...$("list").querySelectorAll(".row:not(.hidden)")];
+    if (!rows.length) return;
+    event.preventDefault();
+    const at = rows.findIndex((r) => r.getAttribute("aria-current") === "true");
+    const down = event.key === "ArrowDown" || event.key === "j";
+    const next = rows[Math.max(0, Math.min(rows.length - 1, at < 0 ? 0 : at + (down ? 1 : -1)))];
+    next.click();
+    next.scrollIntoView({ block: "nearest" });
+  }
+});
+
+const theme = new URLSearchParams(location.search).get("theme");
+if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+header();
+// A link can point at one path or one unit. Otherwise open on the first
+// path, which is an unchecked one whenever there is any.
+const hash = decodeURIComponent(location.hash.slice(1));
+let opening = null;
+if (hash.startsWith("tab=") && TABS.some((t) => t.id === hash.slice(4))) opening = hash.slice(4);
+if (hash.startsWith("unit=")) selected = { unit: hash.slice(5) };
+else if (hash.startsWith("path=") && DATA.paths[Number(hash.slice(5))]) selected = { path: Number(hash.slice(5)) };
+else if (DATA.paths.length) selected = { path: 0 };
+show(opening || (selected && "unit" in selected ? "units" : DATA.paths.length || DATA.idle.length ? "paths" : units.length ? "units" : "paths"));
+detail();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "seam",
+  "description": "Tracks a security review of a codebase and checks every claim against the source.",
+  "owner": {
+    "name": "Moussa Omrane"
+  },
+  "plugins": [
+    {
+      "name": "seam",
+      "source": "./plugin",
+      "description": "Use the seam CLI from Claude Code to track a security review of a codebase."
+    }
+  ]
+}

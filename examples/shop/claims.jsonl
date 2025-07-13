@@ -1,0 +1,16 @@
+{"node":"app.py#preview_link","kind":"entry","summary":"Public route that fetches a URL taken from the query string","quote":"url = request.args[\"url\"]","tags":["http","no-auth"]}
+{"node":"app.py#show_order","kind":"entry","summary":"Returns an order by the id in the path","quote":"@app.route(\"/orders/<order_id>\")","tags":["http"]}
+{"node":"app.py#show_order","kind":"guard","summary":"Requires a logged-in session, but never checks the order belongs to that user","quote":"@require_login","tags":["authn"]}
+{"node":"app.py#export_users","kind":"entry","summary":"Exports every user, including password hashes","quote":"@app.route(\"/admin/export\")","tags":["http"]}
+{"node":"app.py#export_users","kind":"guard","summary":"Admin only, through the require_admin decorator","quote":"@require_admin","tags":["authz"]}
+{"node":"app.py#upload_avatar","kind":"entry","summary":"Accepts an uploaded file and its client-supplied filename","quote":"upload = request.files[\"avatar\"]","tags":["http","upload"]}
+{"node":"app.py#upload_avatar","kind":"guard","summary":"Requires a logged-in session","quote":"@require_login","tags":["authn"]}
+{"node":"auth.py#require_login","kind":"guard","summary":"Rejects requests that have no user id in the session","quote":"if \"user_id\" not in session:","tags":["authn"]}
+{"node":"auth.py#require_admin","kind":"guard","summary":"Rejects requests whose session is not flagged admin","quote":"if not session.get(\"is_admin\"):","tags":["authz"]}
+{"node":"fetch.py#download","kind":"sink","summary":"Makes the server request an arbitrary URL and returns the body","quote":"return requests.get(url, timeout=5).text","tags":["outbound-request"]}
+{"node":"fetch.py#is_public_host","kind":"guard","summary":"Blocks private IP literals only: a hostname that resolves to a private address passes","quote":"return not ipaddress.ip_address(host).is_private","tags":["ssrf-filter","incomplete"]}
+{"node":"store.py#load_order","kind":"sink","summary":"Reads an order row by id with no owner condition","quote":"db.execute(\"select * from orders where id = ?\", (order_id,))","tags":["sql"]}
+{"node":"store.py#dump_users","kind":"data","summary":"Reads every user's email and password hash","quote":"select id, email, password_hash from users","tags":["credentials"]}
+{"node":"store.py#save_avatar","kind":"sink","summary":"Writes to a path built from the client's filename","quote":"path = os.path.join(AVATAR_DIR, filename)","tags":["file-write","path"]}
+{"node":"app.py#payment_webhook","kind":"entry","summary":"Payment provider webhook: trusts the posted event without verifying a signature","quote":"event = request.get_json()","tags":["http","webhook","no-auth"]}
+{"node":"store.py#mark_paid","kind":"sink","summary":"Marks an order as paid","quote":"db.execute(\"update orders set paid = 1 where id = ?\", (order_id,))","tags":["sql","state-change"]}
